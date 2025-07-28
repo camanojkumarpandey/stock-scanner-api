@@ -29,6 +29,76 @@ NIFTY_500_SYMBOLS = [
     'BALKRISIND', 'MRF', 'APOLLOTYRE', 'CEAT'
 ]
 
+def calculate_score(rsi, volume_ratio, adx, mfi, cmf, rsi_min, rsi_max, volume_min, adx_min, mfi_min, cmf_min):
+    """Calculate a composite score based on technical indicators"""
+    score = 0
+    
+    # RSI Score (2 points max)
+    if rsi_min <= rsi <= rsi_max:
+        score += 2
+    elif abs(rsi - (rsi_min + rsi_max) / 2) <= 10:
+        score += 1
+    
+    # Volume Score (2 points max)
+    if volume_ratio >= volume_min:
+        score += min(2, volume_ratio / volume_min)
+    
+    # ADX Score (2 points max)
+    if adx >= adx_min:
+        score += min(2, adx / adx_min)
+    
+    # MFI Score (2 points max)
+    if mfi >= mfi_min:
+        score += min(2, mfi / 50)  # Normalize to 0-2 scale
+    
+    # CMF Score (2 points max)
+    if cmf >= cmf_min:
+        score += min(2, cmf * 10)  # Scale CMF to 0-2 range
+    
+    return min(score, 10)  # Cap at 10 points
+
+def identify_pattern(df):
+    """Identify basic chart patterns"""
+    if len(df) < 20:
+        return "Insufficient Data"
+    
+    recent_close = df['Close'].iloc[-5:].values
+    recent_high = df['High'].iloc[-5:].max()
+    recent_low = df['Low'].iloc[-5:].min()
+    
+    # Simple pattern recognition
+    if recent_close[-1] > recent_close[-2] > recent_close[-3]:
+        return "Uptrend"
+    elif recent_close[-1] < recent_close[-2] < recent_close[-3]:
+        return "Downtrend"
+    elif abs(recent_high - recent_low) / recent_close[-1] < 0.02:
+        return "Consolidation"
+    else:
+        return "Sideways"
+
+def calculate_strength(rsi, volume_ratio, adx, cmf):
+    """Calculate overall strength rating"""
+    strength_score = 0
+    
+    # RSI contribution
+    if 30 <= rsi <= 70:
+        strength_score += 1
+    
+    # Volume contribution
+    if volume_ratio > 1.5:
+        strength_score += 1
+    
+    # ADX contribution
+    if adx > 25:
+        strength_score += 1
+    
+    # CMF contribution
+    if cmf > 0:
+        strength_score += 1
+    
+    strength_map = {0: "Weak", 1: "Low", 2: "Medium", 3: "Strong", 4: "Very Strong"}
+    return strength_map.get(strength_score, "Unknown")
+
 @app.route('/')
 def home():
     return jsonify({
@@ -70,7 +140,7 @@ def scan_stocks():
         adx_min = float(request.args.get('adx_min', 25))
         mfi_min = float(request.args.get('mfi_min', 30))
         cmf_min = float(request.args.get('cmf_min', 0.1))
-        max_stocks = int(request.args.get('limit', 80))  # Limit for faster processing
+        max_stocks = int(request.args.get('limit', 50))  # Reduced for faster processing
         
         print(f"🔍 Starting scan with filters:")
         print(f"   RSI: {rsi_min}-{rsi_max}")
@@ -207,3 +277,46 @@ def scan_stocks():
         scan_summary = {
             "scan_time": round(elapsed_time, 2),
             "stocks_processed": processed,
+            "matches_found": len(results),
+            "errors": errors,
+            "filters_applied": {
+                "rsi_range": f"{rsi_min}-{rsi_max}",
+                "volume_min": volume_min,
+                "adx_min": adx_min,
+                "mfi_min": mfi_min,
+                "cmf_min": cmf_min
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        return jsonify({
+            "success": True,
+            "summary": scan_summary,
+            "results": results[:20],  # Limit to top 20 results
+            "total_results": len(results)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        "error": "Endpoint not found",
+        "available_endpoints": ["/", "/api/health", "/api/symbols", "/api/scan"]
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({
+        "error": "Internal server error",
+        "message": "Please try again later"
+    }), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
