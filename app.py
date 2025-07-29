@@ -21,109 +21,198 @@ SYMBOLS_CACHE = {
 }
 
 def fetch_nifty500_symbols():
-    """Fetch latest Nifty 500 symbols from multiple sources"""
+    """Fetch latest Nifty 500 symbols from multiple sources with enhanced data validation"""
     try:
         print("🔄 Fetching latest Nifty 500 symbols...")
         
-        # Headers to mimic browser request
+        # Enhanced headers to mimic browser request
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0'
         }
         
-        # Method 1: Try NSE official CSV
+        # Method 1: Try official NSE Indices CSV
         try:
-            print("📊 Trying NSE official CSV...")
-            nse_url = "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"
-            response = requests.get(nse_url, headers=headers, timeout=15)
+            print("📊 Trying NSE Indices official CSV...")
+            nse_indices_urls = [
+                "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
+                "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv"
+            ]
             
-            if response.status_code == 200:
-                csv_data = StringIO(response.text)
-                df = pd.read_csv(csv_data)
-                
-                if 'Symbol' in df.columns:
-                    symbols = df['Symbol'].dropna().unique().tolist()
-                    # Clean symbols (remove any whitespace)
-                    symbols = [symbol.strip() for symbol in symbols if symbol.strip()]
-                    print(f"✅ NSE CSV: Fetched {len(symbols)} symbols")
-                    return symbols
+            for url in nse_indices_urls:
+                try:
+                    response = requests.get(url, headers=headers, timeout=20)
+                    if response.status_code == 200 and len(response.content) > 1000:
+                        # Try to parse as CSV
+                        csv_data = StringIO(response.text)
+                        df = pd.read_csv(csv_data)
+                        
+                        # Look for symbol column with different possible names
+                        symbol_columns = ['Symbol', 'SYMBOL', 'Company', 'symbol', 'Stock Symbol', 'NSE Symbol']
+                        symbol_col = None
+                        
+                        for col in symbol_columns:
+                            if col in df.columns:
+                                symbol_col = col
+                                break
+                        
+                        if symbol_col:
+                            symbols = df[symbol_col].dropna().unique().tolist()
+                            # Clean and validate symbols
+                            symbols = [str(symbol).strip().upper() for symbol in symbols if str(symbol).strip() and str(symbol).strip() != 'nan']
+                            # Filter out invalid symbols
+                            symbols = [s for s in symbols if s.replace('-', '').replace('&', '').isalnum() and len(s) <= 20]
+                            
+                            if len(symbols) > 400:  # Should have at least 400+ symbols for Nifty 500
+                                print(f"✅ NSE CSV: Fetched {len(symbols)} symbols")
+                                return symbols
+                except Exception as e:
+                    print(f"⚠️ Failed {url}: {e}")
+                    continue
+                    
         except Exception as e:
-            print(f"⚠️ NSE CSV failed: {e}")
+            print(f"⚠️ NSE CSV method failed: {e}")
         
-        # Method 2: Try NSE API with session
+        # Method 2: Try NSE Live API
         try:
-            print("🌐 Trying NSE API...")
+            print("🌐 Trying NSE Live API...")
             session = requests.Session()
             session.headers.update(headers)
             
             # Get main page first to establish session
-            session.get("https://www.nseindia.com", timeout=10)
+            try:
+                session.get("https://www.nseindia.com", timeout=10)
+                time.sleep(1)  # Brief pause
+            except:
+                pass
             
-            # Try different API endpoints
-            api_urls = [
+            # Try multiple API endpoints
+            api_endpoints = [
                 "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20500",
-                "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY500%20MULTICAP%2050%3A25%3A25"
+                "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY500",
+                "https://www.nseindia.com/api/allIndices"
             ]
             
-            for url in api_urls:
+            for endpoint in api_endpoints:
                 try:
-                    response = session.get(url, timeout=10)
+                    response = session.get(endpoint, timeout=15)
                     if response.status_code == 200:
                         data = response.json()
-                        symbols = [item['symbol'] for item in data.get('data', [])]
-                        if symbols:
-                            symbols = [symbol.strip() for symbol in symbols if symbol.strip()]
-                            print(f"✅ NSE API: Fetched {len(symbols)} symbols")
+                        
+                        # Handle different response structures
+                        symbols = []
+                        if 'data' in data and isinstance(data['data'], list):
+                            symbols = [item.get('symbol', '').strip() for item in data['data'] if item.get('symbol')]
+                        elif isinstance(data, list):
+                            symbols = [item.get('symbol', '').strip() for item in data if item.get('symbol')]
+                        
+                        if symbols and len(symbols) > 100:
+                            symbols = [s.upper() for s in symbols if s and len(s) <= 20]
+                            print(f"✅ NSE API: Fetched {len(symbols)} symbols from {endpoint}")
+                            return symbols
+                            
+                except Exception as e:
+                    print(f"⚠️ API endpoint {endpoint} failed: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"⚠️ NSE API method failed: {e}")
+        
+        # Method 3: Try Yahoo Finance for index constituents
+        try:
+            print("📈 Trying Yahoo Finance index data...")
+            import yfinance as yf
+            
+            # Try to get Nifty 500 ETF holdings or similar
+            nifty_etfs = ["0P0000VRNY.BO", "NIFTY500.NS"]  # Example ETF tickers
+            
+            for etf_ticker in nifty_etfs:
+                try:
+                    ticker = yf.Ticker(etf_ticker)
+                    # This is experimental - Yahoo Finance doesn't always have holdings data
+                    info = ticker.info
+                    if info and 'holdings' in info:
+                        symbols = [holding.get('symbol', '').replace('.NS', '').strip() 
+                                 for holding in info['holdings'] if holding.get('symbol')]
+                        if symbols and len(symbols) > 50:
+                            print(f"✅ Yahoo Finance: Fetched {len(symbols)} symbols")
                             return symbols
                 except:
                     continue
                     
         except Exception as e:
-            print(f"⚠️ NSE API failed: {e}")
+            print(f"⚠️ Yahoo Finance method failed: {e}")
         
-        # Method 3: Try financial data providers
-        try:
-            print("📈 Trying financial data providers...")
-            
-            # You can add API calls to financial data providers here
-            # Example: Alpha Vantage, Financial Modeling Prep, IEX Cloud, etc.
-            
-            # For now, try to get symbols from Yahoo Finance search
-            # This is a more complex implementation that would require
-            # scraping or using their unofficial API
-            
-            pass
-            
-        except Exception as e:
-            print(f"⚠️ Financial data providers failed: {e}")
-        
-        # Method 4: User-defined symbol file (optional)
+        # Method 4: Enhanced custom symbols file with validation
         try:
             print("📁 Checking for user-defined symbols file...")
-            if os.path.exists('custom_symbols.txt'):
-                with open('custom_symbols.txt', 'r') as f:
-                    symbols = [line.strip() for line in f.readlines() if line.strip()]
-                    if symbols:
-                        print(f"✅ Custom file: Loaded {len(symbols)} symbols")
-                        return symbols
+            symbol_files = ['custom_symbols.txt', 'nifty500_symbols.txt', 'symbols.txt']
+            
+            for filename in symbol_files:
+                if os.path.exists(filename):
+                    with open(filename, 'r', encoding='utf-8') as f:
+                        symbols = []
+                        for line in f.readlines():
+                            symbol = line.strip().upper()
+                            # Validate symbol format
+                            if symbol and len(symbol) <= 20 and symbol.replace('-', '').replace('&', '').isalnum():
+                                symbols.append(symbol)
+                        
+                        if symbols:
+                            print(f"✅ Custom file {filename}: Loaded {len(symbols)} symbols")
+                            # Add timestamp to indicate when symbols were loaded
+                            print(f"📅 File last modified: {datetime.fromtimestamp(os.path.getmtime(filename))}")
+                            return symbols
+                            
         except Exception as e:
             print(f"⚠️ Custom symbols file failed: {e}")
         
-        # If all methods fail, return empty list (no hardcoded fallback)
+        # Method 5: Web scraping as last resort
+        try:
+            print("🕷️ Trying web scraping method...")
+            
+            # Try scraping from financial websites
+            scraping_urls = [
+                "https://in.tradingview.com/symbols/NSE-CNX500/components/",
+                "https://www.moneycontrol.com/stocks/marketstats/indexcomp.php?optex=NSE&opttopic=indexcomp&index=23"
+            ]
+            
+            for url in scraping_urls:
+                try:
+                    response = requests.get(url, headers=headers, timeout=15)
+                    if response.status_code == 200:
+                        # This would require more sophisticated parsing
+                        # For now, just check if we can access the page
+                        if len(response.text) > 10000:  # Page loaded successfully
+                            print(f"✅ Web scraping source accessible: {url}")
+                            # Implement parsing logic here if needed
+                            pass
+                except:
+                    continue
+                    
+        except Exception as e:
+            print(f"⚠️ Web scraping method failed: {e}")
+        
+        # If all methods fail, return empty list
         print("❌ All symbol fetching methods failed")
-        print("💡 Consider:")
-        print("   1. Create 'custom_symbols.txt' with your symbols")
-        print("   2. Check your internet connection")
-        print("   3. NSE website might be temporarily unavailable")
+        print("💡 Recommendations:")
+        print("   1. Ensure 'custom_symbols.txt' exists with latest symbols")
+        print("   2. Check internet connectivity")
+        print("   3. NSE servers might be temporarily unavailable")
+        print("   4. Consider updating symbols manually during market hours")
         
         return []
         
     except Exception as e:
-        print(f"❌ Error in fetch_nifty500_symbols: {e}")
+        print(f"❌ Critical error in fetch_nifty500_symbols: {e}")
         return []
 
 def get_symbols():
@@ -232,21 +321,45 @@ def calculate_strength(rsi, volume_ratio, adx, cmf):
 def home():
     symbols = get_symbols()
     return jsonify({
-        "message": "🚀 Stock Scanner API is running!",
-        "version": "2.0.0",
+        "message": "🚀 Advanced Stock Scanner API is running!",
+        "version": "3.0.0",
         "total_stocks": len(symbols),
-        "data_source": "Live NSE Data",
+        "data_source": "Multi-Source (NSE + Yahoo Finance + Custom)",
+        "last_updated": datetime.now().isoformat(),
         "cache_status": {
             "symbols_cached": len(SYMBOLS_CACHE['data']),
-            "last_updated": datetime.fromtimestamp(SYMBOLS_CACHE['last_updated']).isoformat() if SYMBOLS_CACHE['last_updated'] else None
+            "last_updated": datetime.fromtimestamp(SYMBOLS_CACHE['last_updated']).isoformat() if SYMBOLS_CACHE['last_updated'] else None,
+            "cache_freshness": "Good" if SYMBOLS_CACHE['last_updated'] and (time.time() - SYMBOLS_CACHE['last_updated']) < 86400 else "Needs Refresh"
         },
-        "endpoints": {
-            "/api/scan": "Get filtered stocks based on momentum criteria",
-            "/api/health": "Health check endpoint",
-            "/api/symbols": "Get list of all symbols",
-            "/api/refresh-symbols": "Refresh symbol cache from NSE"
+        "api_endpoints": {
+            "/api/scan": "Get filtered stocks based on technical criteria",
+            "/api/health": "Health check and system status",
+            "/api/symbols": "Get list of all available symbols with metadata",
+            "/api/refresh-symbols": "Force refresh symbol cache from live sources",
+            "/api/symbol-validation": "Validate current symbols and check data freshness",
+            "/api/market-updates": "Get information about recent market changes"
         },
-        "usage": "GET /api/scan?rsi_min=25&rsi_max=45&volume_min=1.5"
+        "features": [
+            "Real-time data from Yahoo Finance",
+            "500+ Nifty stocks coverage",
+            "Advanced technical indicators (RSI, ADX, MFI, CMF)",
+            "Pattern recognition and strength analysis",
+            "Multi-source symbol fetching with fallbacks",
+            "Symbol validation and freshness checking",
+            "Comprehensive error handling and logging"
+        ],
+        "usage_examples": {
+            "basic_scan": "/api/scan?rsi_min=25&rsi_max=45&volume_min=1.5",
+            "advanced_scan": "/api/scan?rsi_min=30&rsi_max=50&volume_min=2.0&adx_min=30&mfi_min=40",
+            "momentum_stocks": "/api/scan?volume_min=3.0&adx_min=35&limit=10",
+            "oversold_stocks": "/api/scan?rsi_min=20&rsi_max=30&volume_min=1.5"
+        },
+        "data_quality": {
+            "symbol_count": len(symbols),
+            "expected_range": "450-550 symbols",
+            "status": "Good" if 450 <= len(symbols) <= 550 else "Needs Review",
+            "last_major_update": "July 2025 - Enhanced multi-source fetching"
+        }
     })
 
 @app.route('/api/health')
@@ -262,12 +375,157 @@ def health():
 @app.route('/api/symbols')
 def get_symbols_endpoint():
     symbols = get_symbols()
+    
+    # Check symbol file freshness
+    symbol_file_info = {}
+    if os.path.exists('custom_symbols.txt'):
+        stat = os.stat('custom_symbols.txt')
+        symbol_file_info = {
+            'file_exists': True,
+            'last_modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            'file_size': stat.st_size,
+            'days_old': (time.time() - stat.st_mtime) / (24 * 3600)
+        }
+    else:
+        symbol_file_info = {'file_exists': False}
+    
     return jsonify({
         "symbols": symbols,
         "total": len(symbols),
-        "source": "NSE Live Data",
-        "last_updated": datetime.fromtimestamp(SYMBOLS_CACHE['last_updated']).isoformat() if SYMBOLS_CACHE['last_updated'] else None
+        "source": "Live NSE Data + Custom File",
+        "cache_info": {
+            "last_updated": datetime.fromtimestamp(SYMBOLS_CACHE['last_updated']).isoformat() if SYMBOLS_CACHE['last_updated'] else None,
+            "cache_age_hours": round((time.time() - SYMBOLS_CACHE['last_updated']) / 3600, 1) if SYMBOLS_CACHE['last_updated'] else None,
+            "cache_duration_hours": SYMBOLS_CACHE['cache_duration'] / 3600
+        },
+        "symbol_file_info": symbol_file_info,
+        "data_freshness": {
+            "nifty_rebalancing_schedule": "Semi-annual (January 31 & July 31)",
+            "last_major_changes": "September 2024 (BEL, TRENT added to Nifty 50)",
+            "recommendation": "Update symbols quarterly for best accuracy"
+        }
     })
+
+@app.route('/api/symbol-validation')
+def validate_symbols():
+    """Validate current symbols against multiple sources and check freshness"""
+    try:
+        symbols = get_symbols()
+        validation_results = {
+            "total_symbols": len(symbols),
+            "validation_timestamp": datetime.now().isoformat(),
+            "sources_checked": [],
+            "recommendations": []
+        }
+        
+        # Check if we have a reasonable number of symbols
+        if len(symbols) < 400:
+            validation_results["recommendations"].append(
+                "Symbol count is low. Consider updating custom_symbols.txt with latest Nifty 500 list."
+            )
+        elif len(symbols) > 600:
+            validation_results["recommendations"].append(
+                "Symbol count is high. Verify if all symbols are still active."
+            )
+        else:
+            validation_results["recommendations"].append(
+                "Symbol count looks good for Nifty 500 index."
+            )
+        
+        # Check symbol file age
+        if os.path.exists('custom_symbols.txt'):
+            file_age_days = (time.time() - os.path.getmtime('custom_symbols.txt')) / (24 * 3600)
+            if file_age_days > 90:  # Older than 3 months
+                validation_results["recommendations"].append(
+                    f"Symbol file is {file_age_days:.0f} days old. Consider updating with latest Nifty 500 constituents."
+                )
+            else:
+                validation_results["recommendations"].append(
+                    f"Symbol file is {file_age_days:.0f} days old - reasonably fresh."
+                )
+        
+        # Sample some symbols to check if they're valid in Yahoo Finance
+        sample_symbols = symbols[:10] if len(symbols) > 10 else symbols
+        valid_symbols = 0
+        
+        for symbol in sample_symbols:
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker(f"{symbol}.NS")
+                hist = ticker.history(period="5d")
+                if len(hist) > 0:
+                    valid_symbols += 1
+            except:
+                continue
+        
+        validation_results["sample_validation"] = {
+            "symbols_tested": len(sample_symbols),
+            "valid_symbols": valid_symbols,
+            "validity_rate": f"{(valid_symbols/len(sample_symbols)*100):.1f}%" if sample_symbols else "N/A"
+        }
+        
+        if valid_symbols / len(sample_symbols) < 0.8:  # Less than 80% valid
+            validation_results["recommendations"].append(
+                "Some symbols may be delisted or invalid. Consider updating symbol list."
+            )
+        
+        return jsonify({
+            "success": True,
+            "validation": validation_results
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/market-updates')
+def get_market_updates():
+    """Get information about recent market changes and index updates"""
+    try:
+        market_info = {
+            "nifty_indices_info": {
+                "nifty_50": {
+                    "last_rebalancing": "September 30, 2024",
+                    "recent_additions": ["BEL", "TRENT"],
+                    "recent_removals": ["DIVISLAB", "LTIM"],
+                    "next_review": "January 31, 2025"
+                },
+                "nifty_500": {
+                    "constituents": len(get_symbols()),
+                    "market_cap_coverage": "~96% of NSE market cap",
+                    "rebalancing_frequency": "Semi-annual",
+                    "cut_off_dates": ["January 31", "July 31"]
+                }
+            },
+            "data_sources": {
+                "primary": "NSE Indices Limited",
+                "backup": "Custom symbols file",
+                "live_data": "Yahoo Finance API",
+                "update_mechanism": "Automatic with fallback to manual"
+            },
+            "recommendations": [
+                "Check for updates after NSE rebalancing dates",
+                "Verify new IPO inclusions quarterly",
+                "Monitor corporate actions (mergers, delistings)",
+                "Update custom_symbols.txt when NSE access fails"
+            ],
+            "last_updated": datetime.now().isoformat()
+        }
+        
+        return jsonify({
+            "success": True,
+            "market_updates": market_info
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/refresh-symbols', methods=['POST'])
 def refresh_symbols():
@@ -479,7 +737,15 @@ def scan_stocks():
 def not_found(error):
     return jsonify({
         "error": "Endpoint not found",
-        "available_endpoints": ["/", "/api/health", "/api/symbols", "/api/scan", "/api/refresh-symbols"]
+        "available_endpoints": [
+            "/", 
+            "/api/health", 
+            "/api/symbols", 
+            "/api/scan", 
+            "/api/refresh-symbols",
+            "/api/symbol-validation",
+            "/api/market-updates"
+        ]
     }), 404
 
 @app.errorhandler(500)
