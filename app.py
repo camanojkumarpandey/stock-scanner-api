@@ -51,167 +51,7 @@ def fetch_nifty500_symbols():
                 try:
                     response = requests.get(url, headers=headers, timeout=20)
                     if response.status_code == 200 and len(response.content) > 1000:
-                        # Money Flow Index
-                df['MFI'] = ta.volume.MFIIndicator(
-                    high=df['High'], 
-                    low=df['Low'], 
-                    close=df['Close'], 
-                    volume=df['Volume'],
-                    window=14
-                ).money_flow_index()
-                
-                # ADX (Average Directional Index)
-                df['ADX'] = ta.trend.ADXIndicator(
-                    high=df['High'], 
-                    low=df['Low'], 
-                    close=df['Close'],
-                    window=14
-                ).adx()
-                
-                # Chaikin Money Flow
-                df['CMF'] = ta.volume.ChaikinMoneyFlowIndicator(
-                    high=df['High'], 
-                    low=df['Low'], 
-                    close=df['Close'], 
-                    volume=df['Volume'],
-                    window=20
-                ).chaikin_money_flow()
-                
-                # Get current values (handle NaN)
-                current_rsi = df['RSI'].iloc[-1] if not pd.isna(df['RSI'].iloc[-1]) else 50
-                current_mfi = df['MFI'].iloc[-1] if not pd.isna(df['MFI'].iloc[-1]) else 50
-                current_adx = df['ADX'].iloc[-1] if not pd.isna(df['ADX'].iloc[-1]) else 20
-                current_cmf = df['CMF'].iloc[-1] if not pd.isna(df['CMF'].iloc[-1]) else 0
-                current_price = df['Close'].iloc[-1]
-                prev_price = df['Close'].iloc[-2] if len(df) > 1 else current_price
-                change_percent = ((current_price - prev_price) / prev_price) * 100 if prev_price > 0 else 0
-                
-                # Apply scoring system
-                score = calculate_score(current_rsi, current_volume_ratio, current_adx, current_mfi, current_cmf, 
-                                      rsi_min, rsi_max, volume_min, adx_min, mfi_min, cmf_min)
-                
-                # Check if stock meets minimum criteria
-                if score >= 6.0:
-                    pattern = identify_pattern(df)
-                    strength = calculate_strength(current_rsi, current_volume_ratio, current_adx, current_cmf)
-                    
-                    stock_result = {
-                        'symbol': symbol,
-                        'name': info.get('longName', f"{symbol} Ltd")[:50],
-                        'price': round(current_price, 2),
-                        'change': round(current_price - prev_price, 2),
-                        'changePercent': round(change_percent, 2),
-                        'volume': int(df['Volume'].iloc[-1]),
-                        'rsi': round(current_rsi, 1),
-                        'volumeRatio': round(current_volume_ratio, 2),
-                        'mfi': round(current_mfi, 1),
-                        'adx': round(current_adx, 1),
-                        'cmf': round(current_cmf, 3),
-                        'pattern': pattern,
-                        'strength': strength,
-                        'score': round(score, 1),
-                        'sector': info.get('sector', 'Unknown'),
-                        'source': 'Yahoo Finance Live',
-                        'timestamp': datetime.now().isoformat()
-                    }
-                    
-                    results.append(stock_result)
-                    print(f"✅ {symbol}: Score {score:.1f} - {strength}")
-                
-                processed += 1
-                
-                # Progress update and rate limiting
-                if processed % 10 == 0:
-                    elapsed = time.time() - start_time
-                    print(f"📊 Progress: {processed}/{min(len(symbols), max_stocks)} stocks, {len(results)} matches, {elapsed:.1f}s")
-                    time.sleep(0.5)  # Rate limiting
-                
-            except Exception as e:
-                errors += 1
-                print(f"❌ Error processing {symbol}: {str(e)}")
-                if errors > 20:  # Stop if too many errors
-                    print("🛑 Too many errors, stopping scan")
-                    break
-                continue
-        
-        # Sort results by score (highest first)
-        results.sort(key=lambda x: x['score'], reverse=True)
-        
-        elapsed_time = time.time() - start_time
-        
-        scan_summary = {
-            "scan_time": round(elapsed_time, 2),
-            "stocks_processed": processed,
-            "matches_found": len(results),
-            "errors": errors,
-            "total_symbols_available": len(symbols),
-            "filters_applied": {
-                "rsi_range": f"{rsi_min}-{rsi_max}",
-                "volume_min": volume_min,
-                "adx_min": adx_min,
-                "mfi_min": mfi_min,
-                "cmf_min": cmf_min
-            },
-            "data_source": "NSE Live + Yahoo Finance",
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        return jsonify({
-            "success": True,
-            "summary": scan_summary,
-            "results": results[:25],  # Top 25 results
-            "total_results": len(results)
-        })
-        
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({
-        "error": "Endpoint not found",
-        "available_endpoints": [
-            "/", 
-            "/api/health", 
-            "/api/symbols", 
-            "/api/scan", 
-            "/api/refresh-symbols",
-            "/api/symbol-validation",
-            "/api/market-updates",
-            "/api/symbol-count-analysis"
-        ]
-    }), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({
-        "error": "Internal server error",
-        "message": "Please try again later"
-    }), 500
-
-if __name__ == '__main__':
-    print("🚀 Starting Advanced Stock Scanner with Enhanced Features...")
-    
-    # Initialize symbols cache on startup
-    symbols = get_symbols()
-    print(f"📋 Loaded {len(symbols)} symbols for scanning")
-    
-    # Display symbol count analysis
-    if symbols:
-        count = len(symbols)
-        if 480 <= count <= 520:
-            print(f"✅ Symbol count ({count}) is in optimal range (480-520)")
-        elif 450 <= count <= 480:
-            print(f"⚠️ Symbol count ({count}) is good but could be enhanced")
-        else:
-            print(f"⚠️ Symbol count ({count}) may need review")
-    
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False) Try to parse as CSV
+                        # Try to parse as CSV
                         csv_data = StringIO(response.text)
                         df = pd.read_csv(csv_data)
                         
@@ -241,77 +81,7 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"⚠️ NSE CSV method failed: {e}")
         
-        # Method 2: Try NSE Live API
-        try:
-            print("🌐 Trying NSE Live API...")
-            session = requests.Session()
-            session.headers.update(headers)
-            
-            # Get main page first to establish session
-            try:
-                session.get("https://www.nseindia.com", timeout=10)
-                time.sleep(1)  # Brief pause
-            except:
-                pass
-            
-            # Try multiple API endpoints
-            api_endpoints = [
-                "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20500",
-                "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY500",
-                "https://www.nseindia.com/api/allIndices"
-            ]
-            
-            for endpoint in api_endpoints:
-                try:
-                    response = session.get(endpoint, timeout=15)
-                    if response.status_code == 200:
-                        data = response.json()
-                        
-                        # Handle different response structures
-                        symbols = []
-                        if 'data' in data and isinstance(data['data'], list):
-                            symbols = [item.get('symbol', '').strip() for item in data['data'] if item.get('symbol')]
-                        elif isinstance(data, list):
-                            symbols = [item.get('symbol', '').strip() for item in data if item.get('symbol')]
-                        
-                        if symbols and len(symbols) > 100:
-                            symbols = [s.upper() for s in symbols if s and len(s) <= 20]
-                            print(f"✅ NSE API: Fetched {len(symbols)} symbols from {endpoint}")
-                            return symbols
-                            
-                except Exception as e:
-                    print(f"⚠️ API endpoint {endpoint} failed: {e}")
-                    continue
-                    
-        except Exception as e:
-            print(f"⚠️ NSE API method failed: {e}")
-        
-        # Method 3: Try Yahoo Finance for index constituents
-        try:
-            print("📈 Trying Yahoo Finance index data...")
-            import yfinance as yf
-            
-            # Try to get Nifty 500 ETF holdings or similar
-            nifty_etfs = ["0P0000VRNY.BO", "NIFTY500.NS"]  # Example ETF tickers
-            
-            for etf_ticker in nifty_etfs:
-                try:
-                    ticker = yf.Ticker(etf_ticker)
-                    # This is experimental - Yahoo Finance doesn't always have holdings data
-                    info = ticker.info
-                    if info and 'holdings' in info:
-                        symbols = [holding.get('symbol', '').replace('.NS', '').strip() 
-                                 for holding in info['holdings'] if holding.get('symbol')]
-                        if symbols and len(symbols) > 50:
-                            print(f"✅ Yahoo Finance: Fetched {len(symbols)} symbols")
-                            return symbols
-                except:
-                    continue
-                    
-        except Exception as e:
-            print(f"⚠️ Yahoo Finance method failed: {e}")
-        
-        # Method 4: Enhanced custom symbols file with validation
+        # Method 2: Enhanced custom symbols file with validation
         try:
             print("📁 Checking for user-defined symbols file...")
             symbol_files = ['custom_symbols.txt', 'nifty500_symbols.txt', 'symbols.txt']
@@ -328,38 +98,11 @@ if __name__ == '__main__':
                         
                         if symbols:
                             print(f"✅ Custom file {filename}: Loaded {len(symbols)} symbols")
-                            # Add timestamp to indicate when symbols were loaded
                             print(f"📅 File last modified: {datetime.fromtimestamp(os.path.getmtime(filename))}")
                             return symbols
                             
         except Exception as e:
             print(f"⚠️ Custom symbols file failed: {e}")
-        
-        # Method 5: Web scraping as last resort
-        try:
-            print("🕷️ Trying web scraping method...")
-            
-            # Try scraping from financial websites
-            scraping_urls = [
-                "https://in.tradingview.com/symbols/NSE-CNX500/components/",
-                "https://www.moneycontrol.com/stocks/marketstats/indexcomp.php?optex=NSE&opttopic=indexcomp&index=23"
-            ]
-            
-            for url in scraping_urls:
-                try:
-                    response = requests.get(url, headers=headers, timeout=15)
-                    if response.status_code == 200:
-                        # This would require more sophisticated parsing
-                        # For now, just check if we can access the page
-                        if len(response.text) > 10000:  # Page loaded successfully
-                            print(f"✅ Web scraping source accessible: {url}")
-                            # Implement parsing logic here if needed
-                            pass
-                except:
-                    continue
-                    
-        except Exception as e:
-            print(f"⚠️ Web scraping method failed: {e}")
         
         # If all methods fail, return empty list
         print("❌ All symbol fetching methods failed")
@@ -367,7 +110,6 @@ if __name__ == '__main__':
         print("   1. Ensure 'custom_symbols.txt' exists with latest symbols")
         print("   2. Check internet connectivity")
         print("   3. NSE servers might be temporarily unavailable")
-        print("   4. Consider updating symbols manually during market hours")
         
         return []
         
@@ -401,10 +143,6 @@ def get_symbols():
             return SYMBOLS_CACHE['data']
         else:
             print("❌ No symbols available - neither fresh nor cached")
-            print("💡 Solutions:")
-            print("   1. Check internet connection")
-            print("   2. Create 'custom_symbols.txt' with your symbol list")
-            print("   3. Try refreshing symbols later")
             return []
 
 def calculate_score(rsi, volume_ratio, adx, mfi, cmf, rsi_min, rsi_max, volume_min, adx_min, mfi_min, cmf_min):
@@ -427,13 +165,13 @@ def calculate_score(rsi, volume_ratio, adx, mfi, cmf, rsi_min, rsi_max, volume_m
     
     # MFI Score (2 points max)
     if mfi >= mfi_min:
-        score += min(2, mfi / 50)  # Normalize to 0-2 scale
+        score += min(2, mfi / 50)
     
     # CMF Score (2 points max)
     if cmf >= cmf_min:
-        score += min(2, cmf * 10)  # Scale CMF to 0-2 range
+        score += min(2, cmf * 10)
     
-    return min(score, 10)  # Cap at 10 points
+    return min(score, 10)
 
 def identify_pattern(df):
     """Identify basic chart patterns"""
@@ -506,20 +244,12 @@ def home():
             "Advanced technical indicators (RSI, ADX, MFI, CMF)",
             "Pattern recognition and strength analysis",
             "Multi-source symbol fetching with fallbacks",
-            "Symbol validation and freshness checking",
-            "Comprehensive error handling and logging"
+            "Symbol validation and freshness checking"
         ],
         "usage_examples": {
             "basic_scan": "/api/scan?rsi_min=25&rsi_max=45&volume_min=1.5",
-            "advanced_scan": "/api/scan?rsi_min=30&rsi_max=50&volume_min=2.0&adx_min=30&mfi_min=40",
-            "momentum_stocks": "/api/scan?volume_min=3.0&adx_min=35&limit=10",
-            "oversold_stocks": "/api/scan?rsi_min=20&rsi_max=30&volume_min=1.5"
-        },
-        "data_quality": {
-            "symbol_count": len(symbols),
-            "expected_range": "450-550 symbols",
-            "status": "Good" if 450 <= len(symbols) <= 550 else "Needs Review",
-            "last_major_update": "July 2025 - Enhanced multi-source fetching"
+            "advanced_scan": "/api/scan?rsi_min=30&rsi_max=50&volume_min=2.0&adx_min=30",
+            "momentum_stocks": "/api/scan?volume_min=3.0&adx_min=35&limit=10"
         }
     })
 
@@ -559,88 +289,8 @@ def get_symbols_endpoint():
             "cache_age_hours": round((time.time() - SYMBOLS_CACHE['last_updated']) / 3600, 1) if SYMBOLS_CACHE['last_updated'] else None,
             "cache_duration_hours": SYMBOLS_CACHE['cache_duration'] / 3600
         },
-        "symbol_file_info": symbol_file_info,
-        "data_freshness": {
-            "nifty_rebalancing_schedule": "Semi-annual (January 31 & July 31)",
-            "last_major_changes": "September 2024 (BEL, TRENT added to Nifty 50)",
-            "recommendation": "Update symbols quarterly for best accuracy"
-        }
+        "symbol_file_info": symbol_file_info
     })
-
-@app.route('/api/symbol-validation')
-def validate_symbols():
-    """Validate current symbols against multiple sources and check freshness"""
-    try:
-        symbols = get_symbols()
-        validation_results = {
-            "total_symbols": len(symbols),
-            "validation_timestamp": datetime.now().isoformat(),
-            "sources_checked": [],
-            "recommendations": []
-        }
-        
-        # Check if we have a reasonable number of symbols
-        if len(symbols) < 400:
-            validation_results["recommendations"].append(
-                "Symbol count is low. Consider updating custom_symbols.txt with latest Nifty 500 list."
-            )
-        elif len(symbols) > 600:
-            validation_results["recommendations"].append(
-                "Symbol count is high. Verify if all symbols are still active."
-            )
-        else:
-            validation_results["recommendations"].append(
-                "Symbol count looks good for Nifty 500 index."
-            )
-        
-        # Check symbol file age
-        if os.path.exists('custom_symbols.txt'):
-            file_age_days = (time.time() - os.path.getmtime('custom_symbols.txt')) / (24 * 3600)
-            if file_age_days > 90:  # Older than 3 months
-                validation_results["recommendations"].append(
-                    f"Symbol file is {file_age_days:.0f} days old. Consider updating with latest Nifty 500 constituents."
-                )
-            else:
-                validation_results["recommendations"].append(
-                    f"Symbol file is {file_age_days:.0f} days old - reasonably fresh."
-                )
-        
-        # Sample some symbols to check if they're valid in Yahoo Finance
-        sample_symbols = symbols[:10] if len(symbols) > 10 else symbols
-        valid_symbols = 0
-        
-        for symbol in sample_symbols:
-            try:
-                import yfinance as yf
-                ticker = yf.Ticker(f"{symbol}.NS")
-                hist = ticker.history(period="5d")
-                if len(hist) > 0:
-                    valid_symbols += 1
-            except:
-                continue
-        
-        validation_results["sample_validation"] = {
-            "symbols_tested": len(sample_symbols),
-            "valid_symbols": valid_symbols,
-            "validity_rate": f"{(valid_symbols/len(sample_symbols)*100):.1f}%" if sample_symbols else "N/A"
-        }
-        
-        if valid_symbols / len(sample_symbols) < 0.8:  # Less than 80% valid
-            validation_results["recommendations"].append(
-                "Some symbols may be delisted or invalid. Consider updating symbol list."
-            )
-        
-        return jsonify({
-            "success": True,
-            "validation": validation_results
-        })
-        
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }), 500
 
 @app.route('/api/symbol-count-analysis')
 def symbol_count_analysis():
@@ -657,67 +307,32 @@ def symbol_count_analysis():
                 "why_not_exactly_500": [
                     "Nifty 500 is dynamic - companies are added/removed regularly",
                     "Corporate actions: mergers, delistings, acquisitions",
-                    "Semi-annual rebalancing affects composition",
-                    "Market cap changes affect inclusion criteria"
+                    "Semi-annual rebalancing affects composition"
                 ],
                 "current_situation": "",
                 "recommendations": []
-            },
-            "nifty_500_facts": {
-                "rebalancing_frequency": "Semi-annual (January 31 & July 31)",
-                "market_cap_coverage": "~96% of NSE market capitalization",
-                "selection_criteria": "Top 500 companies by full market capitalization",
-                "liquidity_requirement": "Companies must trade 90% of days in 6 months"
-            },
-            "data_quality_assessment": {
-                "symbol_count_rating": "",
-                "liquidity_focus": "Higher quality stocks prioritized",
-                "market_representation": "Excellent coverage of Indian market"
             }
         }
         
         # Determine current situation based on count
         if current_count < 450:
-            analysis["explanation"]["current_situation"] = "Below expected range - may be missing some recent additions or using conservative filtering"
+            analysis["explanation"]["current_situation"] = "Below expected range - may need symbol list update"
             analysis["explanation"]["recommendations"] = [
                 "Update custom_symbols.txt with latest Nifty 500 list",
-                "Check for recent IPO inclusions",
-                "Verify data source connectivity"
+                "Check for recent IPO inclusions"
             ]
-            analysis["data_quality_assessment"]["symbol_count_rating"] = "Low - Needs Update"
-        elif 450 <= current_count <= 480:
-            analysis["explanation"]["current_situation"] = "Good range - likely using high-quality, liquid stocks from Nifty 500"
-            analysis["explanation"]["recommendations"] = [
-                "Current count is acceptable for quality scanning",
-                "Consider adding recent IPOs if needed",
-                "Monitor for quarterly updates"
-            ]
-            analysis["data_quality_assessment"]["symbol_count_rating"] = "Good - Quality Focused"
-        elif 480 <= current_count <= 520:
-            analysis["explanation"]["current_situation"] = "Excellent range - comprehensive Nifty 500 coverage"
+        elif 450 <= current_count <= 520:
+            analysis["explanation"]["current_situation"] = "Good range - comprehensive coverage"
             analysis["explanation"]["recommendations"] = [
                 "Symbol count is optimal",
-                "Continue current update schedule",
-                "No immediate action needed"
+                "Continue current update schedule"
             ]
-            analysis["data_quality_assessment"]["symbol_count_rating"] = "Excellent - Comprehensive"
         else:
-            analysis["explanation"]["current_situation"] = "Above expected range - may include additional stocks or outdated symbols"
+            analysis["explanation"]["current_situation"] = "Above expected range - may include additional stocks"
             analysis["explanation"]["recommendations"] = [
-                "Review symbol list for duplicates or invalid entries",
-                "Cross-check against official Nifty 500 list",
-                "Consider filtering by market cap or liquidity"
+                "Review symbol list for duplicates",
+                "Cross-check against official Nifty 500 list"
             ]
-            analysis["data_quality_assessment"]["symbol_count_rating"] = "High - Needs Review"
-        
-        # Add file info if available
-        if os.path.exists('custom_symbols.txt'):
-            file_stat = os.stat('custom_symbols.txt')
-            analysis["file_info"] = {
-                "last_modified": datetime.fromtimestamp(file_stat.st_mtime).isoformat(),
-                "file_size_bytes": file_stat.st_size,
-                "days_old": round((time.time() - file_stat.st_mtime) / (24 * 3600), 1)
-            }
         
         return jsonify({
             "success": True,
@@ -732,58 +347,12 @@ def symbol_count_analysis():
             "timestamp": datetime.now().isoformat()
         }), 500
 
-@app.route('/api/market-updates')
-def get_market_updates():
-    """Get information about recent market changes and index updates"""
-    try:
-        market_info = {
-            "nifty_indices_info": {
-                "nifty_50": {
-                    "last_rebalancing": "September 30, 2024",
-                    "recent_additions": ["BEL", "TRENT"],
-                    "recent_removals": ["DIVISLAB", "LTIM"],
-                    "next_review": "January 31, 2025"
-                },
-                "nifty_500": {
-                    "constituents": len(get_symbols()),
-                    "market_cap_coverage": "~96% of NSE market cap",
-                    "rebalancing_frequency": "Semi-annual",
-                    "cut_off_dates": ["January 31", "July 31"]
-                }
-            },
-            "data_sources": {
-                "primary": "NSE Indices Limited",
-                "backup": "Custom symbols file",
-                "live_data": "Yahoo Finance API",
-                "update_mechanism": "Automatic with fallback to manual"
-            },
-            "recommendations": [
-                "Check for updates after NSE rebalancing dates",
-                "Verify new IPO inclusions quarterly",
-                "Monitor corporate actions (mergers, delistings)",
-                "Update custom_symbols.txt when NSE access fails"
-            ],
-            "last_updated": datetime.now().isoformat()
-        }
-        
-        return jsonify({
-            "success": True,
-            "market_updates": market_info
-        })
-        
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
 @app.route('/api/refresh-symbols', methods=['POST'])
 def refresh_symbols():
     """Force refresh of symbols cache"""
     try:
         print("🔄 Force refreshing symbols cache...")
-        SYMBOLS_CACHE['last_updated'] = None  # Force refresh
+        SYMBOLS_CACHE['last_updated'] = None
         symbols = get_symbols()
         
         return jsonify({
@@ -826,8 +395,6 @@ def scan_stocks():
         print(f"   RSI: {rsi_min}-{rsi_max}")
         print(f"   Volume: {volume_min}x")
         print(f"   ADX: {adx_min}+")
-        print(f"   MFI: {mfi_min}+")
-        print(f"   CMF: {cmf_min}+")
         print(f"   Total symbols to scan: {min(len(symbols), max_stocks)}")
         
         results = []
@@ -849,7 +416,7 @@ def scan_stocks():
                 if len(hist) < 20:
                     continue
                 
-                # Get current info (with timeout)
+                # Get current info
                 try:
                     info = stock.info
                 except:
@@ -865,4 +432,150 @@ def scan_stocks():
                 df['Volume_20MA'] = df['Volume'].rolling(window=20).mean()
                 current_volume_ratio = df['Volume'].iloc[-1] / df['Volume_20MA'].iloc[-1] if df['Volume_20MA'].iloc[-1] > 0 else 1
                 
-                #
+                # Money Flow Index
+                df['MFI'] = ta.volume.MFIIndicator(
+                    high=df['High'], 
+                    low=df['Low'], 
+                    close=df['Close'], 
+                    volume=df['Volume'],
+                    window=14
+                ).money_flow_index()
+                
+                # ADX (Average Directional Index)
+                df['ADX'] = ta.trend.ADXIndicator(
+                    high=df['High'], 
+                    low=df['Low'], 
+                    close=df['Close'],
+                    window=14
+                ).adx()
+                
+                # Chaikin Money Flow
+                df['CMF'] = ta.volume.ChaikinMoneyFlowIndicator(
+                    high=df['High'], 
+                    low=df['Low'], 
+                    close=df['Close'], 
+                    volume=df['Volume'],
+                    window=20
+                ).chaikin_money_flow()
+                
+                # Get current values (handle NaN)
+                current_rsi = df['RSI'].iloc[-1] if not pd.isna(df['RSI'].iloc[-1]) else 50
+                current_mfi = df['MFI'].iloc[-1] if not pd.isna(df['MFI'].iloc[-1]) else 50
+                current_adx = df['ADX'].iloc[-1] if not pd.isna(df['ADX'].iloc[-1]) else 20
+                current_cmf = df['CMF'].iloc[-1] if not pd.isna(df['CMF'].iloc[-1]) else 0
+                current_price = df['Close'].iloc[-1]
+                prev_price = df['Close'].iloc[-2] if len(df) > 1 else current_price
+                change_percent = ((current_price - prev_price) / prev_price) * 100 if prev_price > 0 else 0
+                
+                # Apply scoring system
+                score = calculate_score(current_rsi, current_volume_ratio, current_adx, current_mfi, current_cmf, 
+                                      rsi_min, rsi_max, volume_min, adx_min, mfi_min, cmf_min)
+                
+                # Check if stock meets minimum criteria
+                if score >= 6.0:
+                    pattern = identify_pattern(df)
+                    strength = calculate_strength(current_rsi, current_volume_ratio, current_adx, current_cmf)
+                    
+                    stock_result = {
+                        'symbol': symbol,
+                        'name': info.get('longName', f"{symbol} Ltd")[:50],
+                        'price': round(current_price, 2),
+                        'change': round(current_price - prev_price, 2),
+                        'changePercent': round(change_percent, 2),
+                        'volume': int(df['Volume'].iloc[-1]),
+                        'rsi': round(current_rsi, 1),
+                        'volumeRatio': round(current_volume_ratio, 2),
+                        'mfi': round(current_mfi, 1),
+                        'adx': round(current_adx, 1),
+                        'cmf': round(current_cmf, 3),
+                        'pattern': pattern,
+                        'strength': strength,
+                        'score': round(score, 1),
+                        'sector': info.get('sector', 'Unknown'),
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    results.append(stock_result)
+                    print(f"✅ {symbol}: Score {score:.1f} - {strength}")
+                
+                processed += 1
+                
+                # Progress update and rate limiting
+                if processed % 10 == 0:
+                    elapsed = time.time() - start_time
+                    print(f"📊 Progress: {processed}/{min(len(symbols), max_stocks)} stocks, {len(results)} matches, {elapsed:.1f}s")
+                    time.sleep(0.5)
+                
+            except Exception as e:
+                errors += 1
+                print(f"❌ Error processing {symbol}: {str(e)}")
+                if errors > 20:
+                    print("🛑 Too many errors, stopping scan")
+                    break
+                continue
+        
+        # Sort results by score (highest first)
+        results.sort(key=lambda x: x['score'], reverse=True)
+        
+        elapsed_time = time.time() - start_time
+        
+        scan_summary = {
+            "scan_time": round(elapsed_time, 2),
+            "stocks_processed": processed,
+            "matches_found": len(results),
+            "errors": errors,
+            "total_symbols_available": len(symbols),
+            "filters_applied": {
+                "rsi_range": f"{rsi_min}-{rsi_max}",
+                "volume_min": volume_min,
+                "adx_min": adx_min,
+                "mfi_min": mfi_min,
+                "cmf_min": cmf_min
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        return jsonify({
+            "success": True,
+            "summary": scan_summary,
+            "results": results[:25],
+            "total_results": len(results)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        "error": "Endpoint not found",
+        "available_endpoints": [
+            "/", 
+            "/api/health", 
+            "/api/symbols", 
+            "/api/scan", 
+            "/api/refresh-symbols",
+            "/api/symbol-count-analysis"
+        ]
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({
+        "error": "Internal server error",
+        "message": "Please try again later"
+    }), 500
+
+if __name__ == '__main__':
+    print("🚀 Starting Advanced Stock Scanner...")
+    
+    # Initialize symbols cache on startup
+    symbols = get_symbols()
+    print(f"📋 Loaded {len(symbols)} symbols for scanning")
+    
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
